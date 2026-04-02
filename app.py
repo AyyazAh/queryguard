@@ -1,25 +1,12 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime, timedelta
-import sqlite3
-from ml_model import predictor
-from database import db
+from datetime import datetime
 import hashlib
-import os
-
-# Use Streamlit secrets for configuration
-if 'snowflake' in st.secrets:
-    SNOWFLAKE_ACCOUNT = st.secrets['snowflake']['account']
-    SNOWFLAKE_USER = st.secrets['snowflake']['user']
-    SNOWFLAKE_PASSWORD = st.secrets['snowflake']['password']
-
-
 
 # Page configuration
 st.set_page_config(
-    page_title="QueryGuard - Snowflake Cost Optimizer",
+    page_title="QueryGuard - Snowflake Cost Predictor",
     page_icon="🔍",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -57,7 +44,45 @@ if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
 if 'user' not in st.session_state:
     st.session_state.user = None
+if 'query_history' not in st.session_state:
+    st.session_state.query_history = []
+if 'saved_queries' not in st.session_state:
+    st.session_state.saved_queries = []
 
+# Simple cost calculator (no ML dependencies)
+def calculate_cost(query_text, mb_estimate):
+    """Calculate cost based on Snowflake pricing: $0.50 per GB"""
+    gb_scanned = mb_estimate / 1024
+    base_cost = gb_scanned * 0.50
+    
+    query_upper = query_text.upper()
+    
+    # Complexity multipliers
+    complexity = 1.0
+    if 'JOIN' in query_upper:
+        complexity *= 1.5
+    if 'GROUP BY' in query_upper:
+        complexity *= 1.3
+    if 'ORDER BY' in query_upper:
+        complexity *= 1.1
+    if 'DISTINCT' in query_upper:
+        complexity *= 1.2
+    if 'WHERE' in query_upper:
+        complexity *= 0.7
+    if 'LIMIT' in query_upper:
+        complexity *= 0.5
+    
+    final_cost = base_cost * complexity
+    
+    # Cap based on size
+    if mb_estimate <= 10:
+        final_cost = min(final_cost, 0.01)
+    elif mb_estimate <= 100:
+        final_cost = min(final_cost, 0.10)
+    elif mb_estimate <= 1000:
+        final_cost = min(final_cost, 0.50)
+    
+    return round(max(0.001, final_cost), 4)
 
 # Authentication functions
 def login():
@@ -65,16 +90,20 @@ def login():
         st.header("🔐 Login")
         username = st.text_input("Username", key="login_username")
         password = st.text_input("Password", type="password", key="login_password")
-
+        
         if st.button("Login", key="login_button", use_container_width=True):
-            user = db.authenticate_user(username, password)
-            if user:
+            # Demo users
+            if username == "demo" and password == "demo123":
                 st.session_state.authenticated = True
-                st.session_state.user = user
+                st.session_state.user = {
+                    'id': 1,
+                    'username': 'demo',
+                    'email': 'demo@queryguard.com',
+                    'api_key': 'demo_key_123'
+                }
                 st.rerun()
             else:
-                st.error("Invalid credentials")
-
+                st.error("Invalid credentials. Try demo/demo123")
 
 def signup():
     with st.sidebar:
@@ -82,24 +111,17 @@ def signup():
         email = st.text_input("Email", key="signup_email")
         username = st.text_input("Username", key="signup_username")
         password = st.text_input("Password", type="password", key="signup_password")
-        company = st.text_input("Company (Optional)", key="signup_company")
-
+        
         if st.button("Sign Up", key="signup_button", use_container_width=True):
             if email and username and password:
-                user = db.create_user(email, username, password, company)
-                if user:
-                    st.success("Account created! Please login.")
-                else:
-                    st.error("Username or email already exists")
+                st.success("Account created! Please login with demo/demo123")
             else:
                 st.error("Please fill all required fields")
-
 
 def logout():
     st.session_state.authenticated = False
     st.session_state.user = None
     st.rerun()
-
 
 # Main app
 if not st.session_state.authenticated:
@@ -111,49 +133,68 @@ if not st.session_state.authenticated:
             <p>Intelligent Snowflake Query Cost Optimization Platform</p>
         </div>
         """, unsafe_allow_html=True)
-
+        
         st.markdown("""
         ### 🚀 Stop Wasting Money on Snowflake
-
+        
         QueryGuard helps you:
         - **Predict** query costs before execution
         - **Optimize** expensive queries with AI suggestions
         - **Monitor** your Snowflake spending in real-time
-        - **Alert** when queries exceed budget thresholds
+        
+        ### 💡 How It Works
+        
+        1. Enter your SQL query
+        2. Estimate the data size (MB)
+        3. Get instant cost prediction
+        4. Receive optimization recommendations
+        
+        ### 📊 Pricing Reference
+        
+        Snowflake charges **$0.50 per GB scanned**
+        
+        | Size | Estimated Cost |
+        |------|----------------|
+        | 1 MB | $0.0005 |
+        | 10 MB | $0.005 |
+        | 100 MB | $0.05 |
+        | 1 GB | $0.50 |
+        | 10 GB | $5.00 |
         """)
-
+    
     with col2:
         st.markdown("---")
         login()
         st.markdown("---")
         signup()
+        st.markdown("---")
+        st.info("**Demo Credentials:**\nUsername: `demo`\nPassword: `demo123`")
 else:
     # Sidebar for authenticated users
     with st.sidebar:
         st.markdown("# 🔍 QueryGuard")
         st.markdown(f"### Welcome, {st.session_state.user['username']}!")
         st.markdown(f"📧 {st.session_state.user['email']}")
-
+        
         st.markdown("---")
-
+        
         # Navigation
         page = st.radio(
             "Navigation",
-            ["🏠 Dashboard", "💰 Predict Cost", "📜 History", "📊 Analytics", "⚙️ Settings"],
+            ["🏠 Dashboard", "💰 Predict Cost", "📜 History", "📊 Analytics", "⚡ Examples"],
             key="nav_radio"
         )
-
+        
         st.markdown("---")
-
-        # API Key display
+        
         with st.expander("🔑 API Key"):
             st.code(st.session_state.user['api_key'], language="text")
             st.caption("Use this key for API access")
-
+        
         if st.button("🚪 Logout", key="logout_button", use_container_width=True):
             logout()
-
-    # Main content based on navigation
+    
+    # Dashboard
     if page == "🏠 Dashboard":
         st.markdown("""
         <div class="main-header">
@@ -161,264 +202,173 @@ else:
             <p>Your Snowflake Cost Optimization Dashboard</p>
         </div>
         """, unsafe_allow_html=True)
-
-        # Metrics
-        col1, col2, col3, col4 = st.columns(4)
-
-        # Get user stats
-        history = db.get_user_history(st.session_state.user['id'], limit=100)
-
+        
+        col1, col2, col3 = st.columns(3)
+        
         with col1:
-            st.metric("Total Predictions", len(history))
-
+            st.metric("Total Predictions", len(st.session_state.query_history))
+        
         with col2:
-            total_cost = history['predicted_cost'].sum() if len(history) > 0 else 0
+            total_cost = sum(q['cost'] for q in st.session_state.query_history)
             st.metric("Total Predicted Cost", f"${total_cost:.2f}")
-
+        
         with col3:
-            avg_cost = history['predicted_cost'].mean() if len(history) > 0 else 0
+            avg_cost = total_cost / len(st.session_state.query_history) if st.session_state.query_history else 0
             st.metric("Average Query Cost", f"${avg_cost:.4f}")
-
-        with col4:
-            alerts = len(db.get_unresolved_alerts(st.session_state.user['id']))
-            st.metric("Active Alerts", alerts)
-
-        # Recent activity chart
-        if len(history) > 0:
-            st.subheader("📈 Recent Activity")
-            history['date'] = pd.to_datetime(history['created_at']).dt.date
-            daily_costs = history.groupby('date')['predicted_cost'].sum().reset_index()
-
-            fig = px.line(daily_costs, x='date', y='predicted_cost',
-                          title='Daily Predicted Costs',
-                          labels={'predicted_cost': 'Cost ($)', 'date': 'Date'})
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True)
-
-        # Recent queries
-        st.subheader("📋 Recent Queries")
-        if len(history) > 0:
-            st.dataframe(
-                history[['query_text', 'predicted_cost', 'created_at']].head(10),
-                use_container_width=True
-            )
+        
+        if st.session_state.query_history:
+            st.subheader("📋 Recent Queries")
+            df = pd.DataFrame(st.session_state.query_history[-5:])
+            st.dataframe(df[['query', 'cost', 'mb', 'timestamp']], use_container_width=True)
         else:
-            st.info("No queries yet. Start predicting costs!")
-
-
+            st.info("No queries yet. Go to Predict Cost to get started!")
+    
+    # Predict Cost
     elif page == "💰 Predict Cost":
-
         st.header("💰 Predict Query Cost")
-
-        col1, col2 = st.columns([3, 2])
-
+        
+        col1, col2 = st.columns([2, 1])
+        
         with col1:
-
             query = st.text_area(
-
                 "Enter your SQL query",
-
-                height=200,
-
+                height=150,
                 placeholder="SELECT * FROM CUSTOMER WHERE C_NATIONKEY = 10 LIMIT 100",
-
                 key="query_input"
-
             )
-
-            col_a, col_b, col_c = st.columns(3)
-
-            with col_a:
-
-                bytes_estimate = st.number_input("Estimated bytes (MB)", min_value=1, value=10, key="bytes_estimate")
-
-            with col_b:
-
-                threshold = st.number_input("Alert threshold ($)", min_value=0.01, value=1.0, key="threshold")
-
-            with col_c:
-
-                save_to_history = st.checkbox("Save to history", value=True, key="save_history")
-
-            if st.button("🔮 Predict Cost", type="primary", use_container_width=True, key="predict_button"):
-
+            
+            mb = st.slider("Estimated data scanned (MB)", 1, 10000, 10, key="mb_slider")
+            threshold = st.number_input("Alert threshold ($)", min_value=0.01, value=1.00, key="threshold")
+            save_to_history = st.checkbox("Save to history", value=True, key="save_history")
+            
+            if st.button("💰 Predict Cost", type="primary", use_container_width=True):
                 if query:
-
-                    with st.spinner("Analyzing query..."):
-
-                        # FIXED: Pass MB directly, not bytes
-
-                        cost = predictor.predict(query, bytes_estimate)
-
-                        # Save to history
-
-                        if save_to_history:
-                            db.save_query_history(
-
-                                st.session_state.user['id'],
-
-                                query,
-
-                                cost
-
-                            )
-
-                        # Check threshold
-
-                        if cost > threshold:
-                            db.create_alert(
-
-                                st.session_state.user['id'],
-
-                                query,
-
-                                cost,
-
-                                threshold
-
-                            )
-
-                            st.warning(f"⚠️ Alert: Query exceeds ${threshold} threshold!")
-
-                        # Display result
-
-                        st.markdown(f"""
-
-                        <div class="cost-card">
-
-                            <h3>Estimated Cost</h3>
-
-                            <h1>${cost:.4f}</h1>
-
-                            <p>Based on {bytes_estimate} MB scan estimate</p>
-
-                        </div>
-
-                        """, unsafe_allow_html=True)
-
-                        # Optimization tips
-
-                        st.subheader("💡 Optimization Tips")
-
-                        tips = []
-
-                        if 'SELECT *' in query.upper():
-                            tips.append("❌ Avoid SELECT * - specify only needed columns")
-
-                        if 'WHERE' not in query.upper():
-                            tips.append("⚠️ Add WHERE clause to filter data")
-
-                        if 'LIMIT' not in query.upper():
-                            tips.append("💡 Consider adding LIMIT for testing")
-                        if 'JOIN' in query.upper():
-                            tips.append("🔗 Ensure join columns are clustered")
-                        if tips:
-                            for tip in tips:
-                                st.markdown(f"- {tip}")
-
-                        else:
-
-                            st.success("✅ Your query looks optimized!")
+                    cost = calculate_cost(query, mb)
+                    
+                    if save_to_history:
+                        st.session_state.query_history.append({
+                            'query': query[:100],
+                            'cost': cost,
+                            'mb': mb,
+                            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        })
+                    
+                    if cost > threshold:
+                        st.warning(f"⚠️ Alert: Query exceeds ${threshold} threshold! Estimated cost: ${cost:.4f}")
+                    
+                    st.markdown(f"""
+                    <div class="cost-card">
+                        <h3>Estimated Cost</h3>
+                        <h1>${cost:.4f}</h1>
+                        <p>Based on {mb} MB scan estimate</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Optimization tips
+                    st.subheader("💡 Optimization Tips")
+                    tips = []
+                    if 'SELECT *' in query.upper():
+                        tips.append("❌ Avoid SELECT * - specify only needed columns")
+                    if 'WHERE' not in query.upper():
+                        tips.append("⚠️ Add WHERE clause to filter data")
+                    if 'LIMIT' not in query.upper():
+                        tips.append("💡 Consider adding LIMIT for testing")
+                    if 'JOIN' in query.upper():
+                        tips.append("🔗 Ensure join columns are clustered")
+                    if 'GROUP BY' in query.upper():
+                        tips.append("📊 Consider pre-aggregating data")
+                    
+                    if tips:
+                        for tip in tips:
+                            st.markdown(f"- {tip}")
+                    else:
+                        st.success("✅ Your query looks optimized!")
                 else:
                     st.warning("Please enter a SQL query")
+        
         with col2:
-            st.subheader("📚 Saved Queries")
-            saved_queries = db.get_saved_queries(st.session_state.user['id'])
-            if saved_queries:
-
-                for sq in saved_queries:
-                    with st.expander(f"📝 {sq['name']}"):
-                        st.code(sq['query_text'], language='sql')
-                        if st.button(f"Use", key=f"use_{sq['id']}"):
-                            st.session_state.selected_query = sq['query_text']
-                            st.rerun()
-            else:
-                st.info("No saved queries yet")
+            st.subheader("📊 Cost Reference")
+            st.markdown("""
+            | Size | Cost |
+            |------|------|
+            | 1 MB | $0.0005 |
+            | 10 MB | $0.005 |
+            | 100 MB | $0.05 |
+            | 1 GB | $0.50 |
+            | 10 GB | $5.00 |
+            """)
+            
             st.subheader("⚡ Quick Examples")
             examples = [
-                ("Simple Count", "SELECT COUNT(*) FROM CUSTOMER"),
-                ("With Filter", "SELECT * FROM CUSTOMER WHERE C_NATIONKEY = 10 LIMIT 100"),
-                ("Aggregation", "SELECT C_NATIONKEY, COUNT(*) FROM CUSTOMER GROUP BY C_NATIONKEY")
+                ("Simple Count", "SELECT COUNT(*) FROM CUSTOMER", 10),
+                ("With Filter", "SELECT * FROM CUSTOMER WHERE C_NATIONKEY = 10 LIMIT 100", 10),
+                ("Aggregation", "SELECT C_NATIONKEY, COUNT(*) FROM CUSTOMER GROUP BY C_NATIONKEY", 100),
+                ("Join Query", "SELECT * FROM CUSTOMER JOIN ORDERS ON C_CUSTKEY = O_CUSTKEY LIMIT 1000", 500)
             ]
-            for name, example in examples:
+            for name, example, size in examples:
                 if st.button(f"📋 {name}", key=f"ex_{name}"):
-                    st.session_state.selected_query = example
+                    st.session_state.query_input = example
+                    st.session_state.mb_slider = size
                     st.rerun()
-
+    
+    # History
     elif page == "📜 History":
         st.header("📜 Query History")
-
-        history = db.get_user_history(st.session_state.user['id'], limit=100)
-
-        if len(history) > 0:
-            # Filters
-            col1, col2 = st.columns(2)
-            with col1:
-                min_cost = st.number_input("Min Cost ($)", min_value=0.0, value=0.0, key="min_cost")
-            with col2:
-                max_cost = st.number_input("Max Cost ($)", min_value=0.0, value=100.0, key="max_cost")
-
-            filtered = history[(history['predicted_cost'] >= min_cost) &
-                               (history['predicted_cost'] <= max_cost)]
-
-            st.dataframe(
-                filtered[['query_text', 'predicted_cost', 'created_at', 'status']],
-                use_container_width=True,
-                height=400
-            )
-
-            # Export options
-            if st.button("📥 Export to CSV", key="export_csv"):
-                csv = filtered.to_csv(index=False)
-                st.download_button("Download CSV", csv, "query_history.csv", "text/csv", key="download_csv")
+        
+        if st.session_state.query_history:
+            df = pd.DataFrame(st.session_state.query_history)
+            st.dataframe(df, use_container_width=True)
+            
+            if st.button("📥 Clear History"):
+                st.session_state.query_history = []
+                st.rerun()
         else:
-            st.info("No query history yet. Start predicting!")
-
+            st.info("No query history yet. Start predicting costs!")
+    
+    # Analytics
     elif page == "📊 Analytics":
         st.header("📊 Analytics Dashboard")
-
-        history = db.get_user_history(st.session_state.user['id'], limit=500)
-
-        if len(history) > 0:
+        
+        if st.session_state.query_history:
+            df = pd.DataFrame(st.session_state.query_history)
+            
             # Cost distribution
-            st.subheader("Cost Distribution")
-            fig = px.histogram(history, x='predicted_cost', nbins=20,
-                               title='Query Cost Distribution',
-                               labels={'predicted_cost': 'Cost ($)', 'count': 'Number of Queries'})
+            fig = px.histogram(df, x='cost', nbins=20, title='Query Cost Distribution')
             st.plotly_chart(fig, use_container_width=True)
-
-            # Time analysis
-            st.subheader("Time Analysis")
-            history['hour'] = pd.to_datetime(history['created_at']).dt.hour
-            hourly_costs = history.groupby('hour')['predicted_cost'].mean()
-
-            fig = px.line(x=hourly_costs.index, y=hourly_costs.values,
-                          title='Average Cost by Hour',
-                          labels={'x': 'Hour of Day', 'y': 'Average Cost ($)'})
-            st.plotly_chart(fig, use_container_width=True)
-
-            # Top expensive queries
-            st.subheader("Top 10 Most Expensive Queries")
-            top_expensive = history.nlargest(10, 'predicted_cost')[['query_text', 'predicted_cost']]
-            st.dataframe(top_expensive, use_container_width=True)
+            
+            # Cost by size
+            fig2 = px.scatter(df, x='mb', y='cost', title='Cost vs Data Size',
+                              labels={'mb': 'Data Size (MB)', 'cost': 'Cost ($)'})
+            st.plotly_chart(fig2, use_container_width=True)
+            
+            # Top expensive
+            st.subheader("Most Expensive Queries")
+            top = df.nlargest(5, 'cost')[['query', 'cost', 'mb']]
+            st.dataframe(top, use_container_width=True)
         else:
-            st.info("Not enough data for analytics")
+            st.info("Not enough data for analytics. Predict some queries first!")
+    
+    # Examples
+    elif page == "⚡ Examples":
+        st.header("⚡ Example Queries with Cost Estimates")
+        
+        examples = [
+            ("Simple SELECT", "SELECT * FROM CUSTOMER LIMIT 100", 10, 0.005),
+            ("Count with WHERE", "SELECT COUNT(*) FROM ORDERS WHERE O_ORDERDATE >= '2024-01-01'", 50, 0.025),
+            ("GROUP BY", "SELECT C_NATIONKEY, COUNT(*) FROM CUSTOMER GROUP BY C_NATIONKEY", 100, 0.05),
+            ("JOIN", "SELECT C.C_NAME, O.O_ORDERKEY FROM CUSTOMER C JOIN ORDERS O ON C.C_CUSTKEY = O.O_CUSTKEY", 500, 0.25),
+            ("Complex Query", "SELECT N.N_NAME, SUM(O.O_TOTALPRICE) FROM CUSTOMER C JOIN ORDERS O ON C.C_CUSTKEY = O.O_CUSTKEY JOIN NATION N ON C.C_NATIONKEY = N.N_NATIONKEY GROUP BY N.N_NAME", 1000, 0.50)
+        ]
+        
+        for name, query, mb, cost in examples:
+            with st.expander(f"{name} - Estimated: ${cost:.4f}"):
+                st.code(query, language='sql')
+                st.write(f"**Estimated data scanned:** {mb} MB")
+                st.write(f"**Estimated cost:** ${cost:.4f}")
+                if st.button(f"Use this query", key=f"use_{name}"):
+                    st.session_state.query_input = query
+                    st.session_state.mb_slider = mb
+                    st.rerun()
 
-    elif page == "⚙️ Settings":
-        st.header("⚙️ Settings")
-
-        st.subheader("Alert Settings")
-        alert_threshold = st.number_input("Default Alert Threshold ($)", min_value=0.01, value=1.0,
-                                          key="alert_threshold")
-
-        st.subheader("Notification Preferences")
-        email_alerts = st.checkbox("Email Alerts", value=True, key="email_alerts")
-        slack_webhook = st.text_input("Slack Webhook URL (Optional)", key="slack_webhook")
-
-        st.subheader("API Settings")
-        st.info(f"Your API Key: `{st.session_state.user['api_key']}`")
-        if st.button("Regenerate API Key", key="regenerate_key"):
-            st.warning("This will invalidate your old API key")
-
-        if st.button("Save Settings", type="primary", key="save_settings"):
-            st.success("Settings saved successfully!")
+st.markdown("---")
+st.caption("QueryGuard - Predict Snowflake query costs before execution | Powered by Streamlit")
