@@ -1,15 +1,14 @@
 import streamlit as st
 from datetime import datetime
 
-# MUST be the first Streamlit command
+# Must be first
 st.set_page_config(
     page_title="QueryGuard Pro - Snowflake Cost Predictor",
     page_icon="🔮",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
-# Custom CSS (simplified, safe)
+# Simple CSS only for cards
 st.markdown("""
 <style>
     .main-header {
@@ -27,26 +26,12 @@ st.markdown("""
         color: white;
         text-align: center;
     }
-    .glass-card {
-        background: rgba(255,255,255,0.95);
-        border-radius: 10px;
-        padding: 1.5rem;
-        margin: 1rem 0;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }
     .metric-card {
         background: white;
         padding: 1rem;
         border-radius: 10px;
         text-align: center;
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    .stButton > button {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        border-radius: 20px;
-        padding: 0.5rem 1rem;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -59,7 +44,6 @@ if 'user' not in st.session_state:
 if 'query_history' not in st.session_state:
     st.session_state.query_history = []
 
-# Helper functions
 def calculate_cost(query_text, mb_estimate):
     gb = mb_estimate / 1024
     base_cost = gb * 0.50
@@ -77,6 +61,7 @@ def calculate_cost(query_text, mb_estimate):
         final_cost = min(final_cost, 0.01)
     return round(max(0.001, final_cost), 4)
 
+# Login / Signup (unchanged, but safe)
 def login():
     with st.sidebar:
         st.header("🔐 Login")
@@ -104,7 +89,7 @@ def logout():
     st.session_state.user = None
     st.rerun()
 
-# ==================== UNAUTHENTICATED LANDING PAGE ====================
+# ==================== LANDING PAGE (No raw HTML tables) ====================
 if not st.session_state.authenticated:
     col1, col2 = st.columns([2, 1])
     with col1:
@@ -115,37 +100,34 @@ if not st.session_state.authenticated:
         </div>
         """, unsafe_allow_html=True)
         
+        st.markdown("## ✨ Stop Guessing. Start Saving.")
+        st.markdown("Predict your Snowflake query costs before execution with **95% accuracy**.")
+        
+        # Use columns for features instead of raw HTML list
+        st.subheader("🚀 Key Features")
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.markdown("✅ **Real-time Cost Prediction** - Know the price before you run")
+            st.markdown("✅ **Smart Optimization** - AI-powered suggestions to reduce costs")
+            st.markdown("✅ **Analytics Dashboard** - Track spending patterns")
+        with col_b:
+            st.markdown("✅ **Cost Alerts** - Never get surprised by bills")
+            st.markdown("✅ **Query History** - Learn from past queries")
+            st.markdown("✅ **API Access** - Integrate with your workflow")
+        
+        # Pricing table using Streamlit's native markdown table (safe)
+        st.subheader("📊 Pricing Reference (Snowflake)")
         st.markdown("""
-        <div class="glass-card">
-            <h2>✨ Stop Guessing. Start Saving.</h2>
-            <p>Predict your Snowflake query costs before execution with 95% accuracy.</p>
-            
-            <h3>🚀 Key Features</h3>
-            <ul>
-                <li><strong>Real-time Cost Prediction</strong> - Know the price before you run</li>
-                <li><strong>Smart Optimization</strong> - AI-powered suggestions to reduce costs</li>
-                <li><strong>Analytics Dashboard</strong> - Track spending patterns</li>
-                <li><strong>Cost Alerts</strong> - Never get surprised by bills</li>
-                <li><strong>Query History</strong> - Learn from past queries</li>
-                <li><strong>API Access</strong> - Integrate with your workflow</li>
-            </ul>
-            
-            <h3>📊 Pricing Reference (Snowflake)</h3>
-            <table style="width:100%; border-collapse:collapse;">
-                <tr style="background:#667eea; color:white;">
-                    <th style="padding:8px;">Data Size</th>
-                    <th style="padding:8px;">Estimated Cost</th>
-                </tr>
-                <tr><td>1 MB</td><td>$0.0005</td></tr>
-                <tr style="background:#f0f0f0;"><td>10 MB</td><td>$0.005</td></tr>
-                <tr><td>100 MB</td><td>$0.05</td></tr>
-                <tr style="background:#f0f0f0;"><td>1 GB</td><td>$0.50</td></tr>
-                <tr><td>10 GB</td><td>$5.00</td></tr>
-                <tr style="background:#f0f0f0;"><td>100 GB</td><td>$50.00</td></tr>
-                <tr><td>1 TB</td><td>$500.00</td></tr>
-            </table>
-        </div>
-        """, unsafe_allow_html=True)
+        | Data Size | Estimated Cost |
+        |-----------|----------------|
+        | 1 MB      | $0.0005        |
+        | 10 MB     | $0.005         |
+        | 100 MB    | $0.05          |
+        | 1 GB      | $0.50          |
+        | 10 GB     | $5.00          |
+        | 100 GB    | $50.00         |
+        | 1 TB      | $500.00        |
+        """)
     
     with col2:
         st.markdown("<br>", unsafe_allow_html=True)
@@ -230,18 +212,15 @@ else:
                     if 'LIMIT' not in query.upper():
                         tips.append("💡 Add LIMIT for testing")
                     if tips:
-                        st.info("\n".join(tips))
+                        for tip in tips:
+                            st.info(tip)
                     else:
                         st.success("✅ Your query looks optimized!")
                 else:
                     st.warning("Enter a query")
         
         with col2:
-            st.markdown("""
-            <div class="glass-card">
-                <h3>⚡ Quick Examples</h3>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown("### ⚡ Quick Examples")
             examples = {
                 "Simple SELECT": "SELECT * FROM CUSTOMER LIMIT 100",
                 "With WHERE": "SELECT * FROM CUSTOMER WHERE C_NATIONKEY = 10 LIMIT 100",
